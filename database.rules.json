@@ -1,21 +1,30 @@
 {
   "rules": {
-    ".read": true,
+    ".read": false,
     ".write": false,
-    "current_board": {
-      ".write": "auth != null && auth.uid === 'ADMIN_UID'",
-      "tickets": {
-        "$id": {
-          ".write": "data.child('opened').val() === false && newData.child('opened').val() === true && newData.child('rank').val() === data.child('rank').val() && newData.child('reward').val() === data.child('reward').val()"
-        }
-      },
-      "remaining": { ".write": "data.isNumber() && data.val() > 0 && newData.val() === data.val() - 1" },
-      "lastOne": { ".write": "!data.exists() && root.child('current_board/remaining').val() === 0" },
-      "status": { ".write": "newData.val() === 'completed' && root.child('current_board/remaining').val() === 0" }
+    "auction_item": {
+      ".read": true,
+      ".write": "auth != null && (auth.uid === 'ADMIN_UID' || (data.child('status').val() === 'active' && now < data.child('endTime').val() && newData.child('id').val() === data.child('id').val() && newData.child('title').val() === data.child('title').val() && newData.child('endTime').val() === data.child('endTime').val() && newData.child('startPrice').val() === data.child('startPrice').val() && newData.child('bidStep').val() === data.child('bidStep').val() && newData.child('buyNowPrice').val() === data.child('buyNowPrice').val() && newData.child('bidCount').val() === data.child('bidCount').val() + 1 && newData.child('currentHighestBid').val() >= (data.child('bidCount').val() === 0 ? data.child('startPrice').val() : data.child('currentHighestBid').val() + data.child('bidStep').val()) && (newData.child('status').val() === 'active' || (newData.child('status').val() === 'sold_instant' && newData.child('currentHighestBid').val() >= data.child('buyNowPrice').val()))))"
     },
-    "history": {
+    "auction_private": {
+      ".read": "auth != null && auth.uid === 'ADMIN_UID'",
       ".write": "auth != null && auth.uid === 'ADMIN_UID'",
-      "$h": { ".write": "!data.exists() && newData.hasChildren(['userId','userName','ticketId','rank','reward'])" }
+      "highest": {
+        ".write": "auth != null && newData.child('uid').val() === auth.uid && newData.child('amount').val() <= root.child('auction_item/currentHighestBid').val() && (!data.exists() || newData.child('amount').val() > data.child('amount').val())"
+      }
+    },
+    "bids": {
+      ".read": "auth != null && auth.uid === 'ADMIN_UID'",
+      ".write": "auth != null && auth.uid === 'ADMIN_UID'",
+      "$id": {
+        ".write": "auth != null && !data.exists() && newData.hasChildren(['auctionId','uid','nickname','discordId','amount','timestamp']) && newData.child('uid').val() === auth.uid && newData.child('auctionId').val() === root.child('auction_item/id').val() && newData.child('amount').val() <= root.child('auction_item/currentHighestBid').val()"
+      }
+    },
+    "users": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.uid === 'ADMIN_UID')",
+        ".write": "auth != null && auth.uid === $uid && !data.exists() && newData.hasChildren(['nickname','discordId','createdAt'])"
+      }
     }
   }
 }
