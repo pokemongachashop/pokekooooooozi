@@ -1,0 +1,80 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>이치방쿠지</title><link rel="stylesheet" href="style.css"></head><body>
+<header><b>ICHIBAN KUJI</b><span id="who"></span></header>
+<main>
+<div class="stats">
+<div class="card"><h2>남은 티켓</h2><div class="big" id="remain">-</div><div class="row"><span>1회 비용</span><span><span id="price">-</span> 코인</span></div></div>
+<div class="card"><h2>등급별 잔여</h2><div id="prizes"></div></div>
+<div class="card"><h2>라스트원상</h2><div id="lastinfo"></div></div>
+</div>
+<div class="card"><div id="grid">불러오는 중...</div></div>
+</main>
+<div id="modal"><div class="box" id="box"><div id="mt"></div><div class="rank" id="mr"></div><p id="mn"></p><p id="mc"></p><button class="b" id="mx">확인</button></div></div>
+<script type="module">
+import { db } from "./firebase-config.js";
+import { ref, onValue, runTransaction, push, set } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+const q = new URLSearchParams(location.search);
+const uid = q.get("userId") || "", uname = q.get("userName") || "", token = q.get("token") || "";
+const $ = id => document.getElementById(id);
+let board = null, busy = false;
+$("who").textContent = uname ? "닉네임: " + uname : "디스코드 링크로 입장해 주세요";
+$("mx").onclick = () => $("modal").classList.remove("show");
+onValue(ref(db, "current_board"), s => { board = s.val(); render(); });
+
+function row(a, b) { const d = document.createElement("div"); d.className = "row"; const x = document.createElement("span"), y = document.createElement("span"); x.textContent = a; y.textContent = b; d.append(x, y); return d; }
+function render() {
+  const g = $("grid"); g.textContent = "";
+  if (!board) { g.textContent = "진행 중인 판이 없습니다."; return; }
+  const t = board.tickets || {}, ids = Object.keys(t).sort((a, b) => a - b), prizes = board.prizes || [];
+  const left = {}; ids.forEach(i => { if (!t[i].opened) left[t[i].rank] = (left[t[i].rank] || 0) + 1; });
+  $("remain").textContent = board.remaining + " / " + board.total_tickets;
+  $("price").textContent = board.price_per_ticket;
+  const p = $("prizes"); p.textContent = "";
+  prizes.forEach(z => p.append(row(z.name + " (" + z.reward + ")", (left[z.rank] || 0) + " / " + z.count)));
+  const li = $("lastinfo"); li.textContent = "";
+  if (board.lastOne) li.append(row("획득자", board.lastOne.userName), row("보너스", board.lastOne.reward + " 코인"));
+  else { li.append(row("보너스", board.last_one_reward + " 코인"), row("마지막 티켓까지", Math.max(board.remaining - 1, 0) + "장")); }
+  ids.forEach(i => {
+    const k = t[i], b = document.createElement("button"); b.className = "t";
+    if (k.opened) {
+      b.disabled = true; const r = document.createElement("span"); r.className = "rk"; r.textContent = k.rank;
+      const n = document.createElement("small"); n.textContent = k.openedBy || ""; const no = document.createElement("small"); no.textContent = "#" + i;
+      b.append(r, n, no);
+    } else { b.textContent = i; b.onclick = () => pick(i, b); }
+    g.append(b);
+  });
+}
+async function pick(id, el) {
+  if (busy) return;
+  if (!uid || !uname) return alert("디스코드에서 받은 링크로 입장해야 뽑을 수 있습니다.");
+  if (!board || board.remaining < 1) return;
+  if (!confirm(id + "번 티켓을 뜯을까요? (" + board.price_per_ticket + " 코인)")) return;
+  busy = true; el.classList.add("tear");
+  try {
+    const r = await runTransaction(ref(db, "current_board/tickets/" + id), c => {
+      if (!c || c.opened) return;            // 이미 뜯김: 중단
+      c.opened = true; c.openedBy = uname; c.openedById = uid; c.openedAt = Date.now(); return c;
+    });
+    if (!r.committed) return alert("이미 다른 유저가 뜯은 티켓입니다.");
+    const tk = r.snapshot.val();
+    const rem = await runTransaction(ref(db, "current_board/remaining"), c => (c > 0 ? c - 1 : undefined));
+    const last = rem.snapshot.val() === 0, bonus = board.last_one_reward || 0;
+    await push(ref(db, "history"), { timestamp: Date.now(), userId: uid, userName: uname, ticketId: +id, rank: tk.rank, reward: tk.reward, token });
+    if (last) {
+      await set(ref(db, "current_board/lastOne"), { userId: uid, userName: uname, reward: bonus });
+      await push(ref(db, "history"), { timestamp: Date.now(), userId: uid, userName: uname, ticketId: +id, rank: "LAST", reward: bonus, token });
+      await set(ref(db, "current_board/status"), "completed");
+    }
+    show(tk, last, bonus);
+  } catch (e) { alert("오류: " + e.message); } finally { busy = false; el.classList.remove("tear"); }
+}
+function show(tk, last, bonus) {
+  const p = (board.prizes || []).find(z => z.rank === tk.rank);
+  $("box").className = "box" + (last ? " last" : "");
+  $("mt").textContent = "결과"; $("mr").textContent = tk.rank;
+  $("mn").textContent = (p ? p.name : tk.rank) + " 당첨";
+  $("mc").textContent = "획득 코인: " + tk.reward + (last ? " + 라스트원상 보너스 " + bonus : "");
+  if (last) $("mt").textContent = "라스트원상 획득";
+  $("modal").classList.add("show");
+}
+</script></body></html>

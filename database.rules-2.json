@@ -1,0 +1,21 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": false,
+    "current_board": {
+      ".write": "auth != null && auth.uid === 'ADMIN_UID'",
+      "tickets": {
+        "$id": {
+          ".write": "data.child('opened').val() === false && newData.child('opened').val() === true && newData.child('rank').val() === data.child('rank').val() && newData.child('reward').val() === data.child('reward').val()"
+        }
+      },
+      "remaining": { ".write": "data.isNumber() && data.val() > 0 && newData.val() === data.val() - 1" },
+      "lastOne": { ".write": "!data.exists() && root.child('current_board/remaining').val() === 0" },
+      "status": { ".write": "newData.val() === 'completed' && root.child('current_board/remaining').val() === 0" }
+    },
+    "history": {
+      ".write": "auth != null && auth.uid === 'ADMIN_UID'",
+      "$h": { ".write": "!data.exists() && newData.hasChildren(['userId','userName','ticketId','rank','reward'])" }
+    }
+  }
+}
