@@ -39,7 +39,7 @@ function setReg(r) { reg = r; $("dl").classList.toggle("hide", !r); $("go").text
 $("go").onclick = async () => {
   const nk = $("nk").value.trim(), pw = $("pw").value; $("err").textContent = "";
   const isMail = nk.includes("@");
-  if (isMail && !reg) { try { await signInWithEmailAndPassword(auth, nk, pw); } catch (e) { $("err").textContent = "이메일 또는 비밀번호가 올바르지 않습니다."; } return; }
+  if (isMail && !reg) { try { await signInWithEmailAndPassword(auth, nk, pw); } catch (e) { $("err").textContent = "관리자 로그인 실패: " + e.code; } return; }
   if (nk.length < 2 || nk.length > 16 || isMail) return $("err").textContent = "닉네임은 2~16자이며 @를 포함할 수 없습니다.";
   try {
     const em = await emailOf(nk);
