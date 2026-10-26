@@ -1,80 +1,131 @@
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>이치방쿠지</title><link rel="stylesheet" href="style.css"></head><body>
-<header><b>ICHIBAN KUJI</b><span id="who"></span></header>
+<title>미스테리 경매</title><link rel="stylesheet" href="style.css"></head><body>
+<header><b>MYSTERY AUCTION</b><span id="badge" class="badge hide"></span><span><span id="who" class="mu"></span> <button class="b g hide" id="out">로그아웃</button></span></header>
 <main>
-<div class="stats">
-<div class="card"><h2>남은 티켓</h2><div class="big" id="remain">-</div><div class="row"><span>1회 비용</span><span><span id="price">-</span> 코인</span></div></div>
-<div class="card"><h2>등급별 잔여</h2><div id="prizes"></div></div>
-<div class="card"><h2>라스트원상</h2><div id="lastinfo"></div></div>
+<div class="card hide" id="auth"><div class="tabs"><button class="b" id="tl">로그인</button><button class="b g" id="tr">가입</button></div>
+<div class="f"><label>닉네임 (관리자는 이메일 입력)<input id="nk" maxlength="64"></label><label>비밀번호 (6자 이상)<input id="pw" type="password"></label>
+<label id="dl" class="hide">디스코드 ID (숫자)<input id="did" inputmode="numeric"></label><button class="b" id="go">로그인</button><div class="warn" id="err"></div></div></div>
+<div class="hide" id="adm">
+<div class="card"><h2>관리자 패널 - 현재 경매 상태</h2><div id="a_st" class="row"></div><div id="a_hb" class="row"></div></div>
+<div class="card"><h2>경매 설정 / 상품 등록</h2><div class="f">
+<label>상품명<input id="a_title"></label><label>이미지 URL<input id="a_img" placeholder="https://..."></label><label>상세 설명<textarea id="a_desc" rows="3"></textarea></label>
+<label>시작가<input id="a_sp" type="number" value="1000"></label><label>최소 호가 단위<input id="a_step" type="number" value="100"></label><label>즉시 판매가<input id="a_bn" type="number" value="10000"></label>
+<label>종료 일시<input id="a_end" type="datetime-local"></label></div>
+<button class="b" id="a_start">경매 시작 / 리셋</button> <button class="b r" id="a_stop">강제 종료 (낙찰 확정)</button> <span id="a_msg"></span></div>
+<div class="card"><h2>실시간 입찰 감사 로그</h2><div style="overflow:auto"><table><thead><tr><th>입찰 시간</th><th>입찰자</th><th>디스코드 ID</th><th>금액</th><th>비고</th></tr></thead><tbody id="a_log"></tbody></table></div></div>
 </div>
-<div class="card"><div id="grid">불러오는 중...</div></div>
-</main>
-<div id="modal"><div class="box" id="box"><div id="mt"></div><div class="rank" id="mr"></div><p id="mn"></p><p id="mc"></p><button class="b" id="mx">확인</button></div></div>
+<div id="empty" class="card">불러오는 중...</div>
+<div class="grid2 hide" id="main">
+<div class="card"><div class="img" id="img"></div><h1 id="title"></h1><div class="mu" id="desc"></div><p class="mu">낙찰 전까지 입찰자는 모두 익명으로 표시됩니다.</p><h2>남은 시간</h2><div class="timer" id="timer">--:--:--</div></div>
+<div class="card"><h2>현재 최고 입찰가</h2><div class="big" id="cur"></div><div class="mu" id="hi"></div>
+<div class="row"><span>시작가</span><span id="sp"></span></div><div class="row"><span>최소 호가 단위</span><span id="st"></span></div>
+<div class="row"><span>즉시 구매가</span><span id="bn"></span></div><div class="row"><span>총 입찰 횟수</span><span id="bc"></span></div>
+<div class="q" id="q"></div><div class="f"><input id="amt" type="number" inputmode="numeric" placeholder="입찰 금액"><button class="b" id="bid">입찰하기</button><button class="b y" id="buy">즉시 구매</button></div><div class="warn" id="msg"></div></div>
+</div></main>
 <script type="module">
-import { db } from "./firebase-config.js";
-import { ref, onValue, runTransaction, push, set } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-const q = new URLSearchParams(location.search);
-const uid = q.get("userId") || "", uname = q.get("userName") || "", token = q.get("token") || "";
-const $ = id => document.getElementById(id);
-let board = null, busy = false;
-$("who").textContent = uname ? "닉네임: " + uname : "디스코드 링크로 입장해 주세요";
-$("mx").onclick = () => $("modal").classList.remove("show");
-onValue(ref(db, "current_board"), s => { board = s.val(); render(); });
-
-function row(a, b) { const d = document.createElement("div"); d.className = "row"; const x = document.createElement("span"), y = document.createElement("span"); x.textContent = a; y.textContent = b; d.append(x, y); return d; }
-function render() {
-  const g = $("grid"); g.textContent = "";
-  if (!board) { g.textContent = "진행 중인 판이 없습니다."; return; }
-  const t = board.tickets || {}, ids = Object.keys(t).sort((a, b) => a - b), prizes = board.prizes || [];
-  const left = {}; ids.forEach(i => { if (!t[i].opened) left[t[i].rank] = (left[t[i].rank] || 0) + 1; });
-  $("remain").textContent = board.remaining + " / " + board.total_tickets;
-  $("price").textContent = board.price_per_ticket;
-  const p = $("prizes"); p.textContent = "";
-  prizes.forEach(z => p.append(row(z.name + " (" + z.reward + ")", (left[z.rank] || 0) + " / " + z.count)));
-  const li = $("lastinfo"); li.textContent = "";
-  if (board.lastOne) li.append(row("획득자", board.lastOne.userName), row("보너스", board.lastOne.reward + " 코인"));
-  else { li.append(row("보너스", board.last_one_reward + " 코인"), row("마지막 티켓까지", Math.max(board.remaining - 1, 0) + "장")); }
-  ids.forEach(i => {
-    const k = t[i], b = document.createElement("button"); b.className = "t";
-    if (k.opened) {
-      b.disabled = true; const r = document.createElement("span"); r.className = "rk"; r.textContent = k.rank;
-      const n = document.createElement("small"); n.textContent = k.openedBy || ""; const no = document.createElement("small"); no.textContent = "#" + i;
-      b.append(r, n, no);
-    } else { b.textContent = i; b.onclick = () => pick(i, b); }
-    g.append(b);
-  });
+import { db, auth } from "./firebase-config.js";
+import { ref, onValue, get, set, push, remove, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+const $ = id => document.getElementById(id), fmt = n => Number(n || 0).toLocaleString("ko-KR");
+let isAdmin = false, admOn = false, hi = null, bids = [], me = null, item = null, off = 0, myLast = 0, busy = false, reg = false, pend = null;
+onValue(ref(db, ".info/serverTimeOffset"), s => off = s.val() || 0);
+const now = () => Date.now() + off;
+async function emailOf(n) {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(n.trim().toLowerCase()));
+  return "u" + [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 40) + "@mystery-auction.example";
 }
-async function pick(id, el) {
-  if (busy) return;
-  if (!uid || !uname) return alert("디스코드에서 받은 링크로 입장해야 뽑을 수 있습니다.");
-  if (!board || board.remaining < 1) return;
-  if (!confirm(id + "번 티켓을 뜯을까요? (" + board.price_per_ticket + " 코인)")) return;
-  busy = true; el.classList.add("tear");
+$("tl").onclick = () => setReg(false); $("tr").onclick = () => setReg(true);
+function setReg(r) { reg = r; $("dl").classList.toggle("hide", !r); $("go").textContent = r ? "가입하고 시작" : "로그인"; $("tl").className = "b" + (r ? " g" : ""); $("tr").className = "b" + (r ? "" : " g"); }
+$("go").onclick = async () => {
+  const nk = $("nk").value.trim(), pw = $("pw").value; $("err").textContent = "";
+  const isMail = nk.includes("@");
+  if (isMail && !reg) { try { await signInWithEmailAndPassword(auth, nk, pw); } catch (e) { $("err").textContent = "이메일 또는 비밀번호가 올바르지 않습니다."; } return; }
+  if (nk.length < 2 || nk.length > 16 || isMail) return $("err").textContent = "닉네임은 2~16자이며 @를 포함할 수 없습니다.";
   try {
-    const r = await runTransaction(ref(db, "current_board/tickets/" + id), c => {
-      if (!c || c.opened) return;            // 이미 뜯김: 중단
-      c.opened = true; c.openedBy = uname; c.openedById = uid; c.openedAt = Date.now(); return c;
+    const em = await emailOf(nk);
+    if (reg) {
+      const did = $("did").value.trim(); if (!/^\d{5,25}$/.test(did)) return $("err").textContent = "디스코드 ID(숫자)를 입력하세요.";
+      pend = { nickname: nk, discordId: did, createdAt: Date.now() };
+      const c = await createUserWithEmailAndPassword(auth, em, pw); await set(ref(db, "users/" + c.user.uid), pend);
+    } else await signInWithEmailAndPassword(auth, em, pw);
+  } catch (e) { $("err").textContent = e.code === "auth/email-already-in-use" ? "이미 사용 중인 닉네임입니다." : e.code === "auth/invalid-credential" ? "닉네임 또는 비밀번호가 올바르지 않습니다." : e.message; }
+};
+$("out").onclick = () => signOut(auth);
+onAuthStateChanged(auth, async u => {
+  isAdmin = false;
+  if (u) { try { await get(ref(db, "auction_private")); isAdmin = true; } catch (e) {} }
+  $("adm").classList.toggle("hide", !isAdmin); if (isAdmin) admInit();
+  if (u) { const p = pend || (await get(ref(db, "users/" + u.uid))).val() || { nickname: "관리자", discordId: "" }; me = { uid: u.uid, ...p }; $("who").textContent = me.nickname; }
+  else { me = null; $("who").textContent = ""; }
+  $("auth").classList.toggle("hide", !!u); $("out").classList.toggle("hide", !u); render();
+});
+onValue(ref(db, "auction_item"), s => { item = s.val(); render(); });
+const state = () => !item ? "none" : item.status === "sold_instant" ? "sold" : (item.status === "ended" || now() >= item.endTime) ? "end" : "active";
+const minBid = () => item.bidCount ? item.currentHighestBid + item.bidStep : item.startPrice;
+function render() {
+  if (isAdmin) admDraw();
+  $("empty").classList.toggle("hide", !!item); $("main").classList.toggle("hide", !item);
+  if (!item) { $("empty").textContent = "진행 중인 경매가 없습니다."; $("badge").classList.add("hide"); return; }
+  const i = $("img"); i.textContent = "";
+  if (item.imageUrl) { const im = new Image(); im.src = item.imageUrl; im.onerror = () => { i.textContent = "IMAGE"; }; i.append(im); } else i.textContent = "IMAGE";
+  $("title").textContent = item.title; $("desc").textContent = item.description || "";
+  $("sp").textContent = fmt(item.startPrice); $("st").textContent = fmt(item.bidStep); $("bn").textContent = fmt(item.buyNowPrice); $("bc").textContent = item.bidCount || 0;
+  $("cur").textContent = item.bidCount ? fmt(item.currentHighestBid) : fmt(item.startPrice) + " (입찰 없음)";
+  const mn = minBid(); $("q").textContent = "";
+  [0, 1, 4].forEach(k => { const b = document.createElement("button"); b.className = "b g"; b.textContent = fmt(mn + k * item.bidStep); b.onclick = () => place(mn + k * item.bidStep, false); $("q").append(b); });
+  $("amt").min = mn; tick();
+}
+function tick() {
+  if (!item) return; const s = state(), left = Math.max(0, item.endTime - now());
+  $("timer").textContent = s === "active" ? [3600000, 60000, 1000].map((d, k) => String(Math.floor(left / d) % (k ? 60 : 1e6)).padStart(2, "0")).join(":") : "00:00:00";
+  const bd = $("badge"); bd.classList.remove("hide"); bd.className = "badge" + (s === "end" ? " end" : s === "sold" ? " sold" : "");
+  bd.textContent = s === "active" ? "진행 중" : s === "sold" ? "즉시구매 낙찰" : "마감";
+  $("hi").textContent = !item.bidCount ? "" : (myLast && myLast === item.currentHighestBid && s !== "none") ? "내가 현재 최고 입찰자입니다." : "현재 최고 입찰자: 익명의 입찰자";
+  const on = !!me && !isAdmin && s === "active" && !busy, v = +$("amt").value;
+  $("bid").disabled = !on || !(v >= minBid()); $("buy").disabled = !on; [...$("q").children].forEach(b => b.disabled = !on);
+  $("msg").textContent = isAdmin ? "관리자 계정은 입찰할 수 없습니다." : !me && s === "active" ? "입찰하려면 로그인하세요." : "";
+}
+setInterval(tick, 500); $("amt").oninput = tick; $("bid").onclick = () => place(+$("amt").value, false);
+$("buy").onclick = () => { if (confirm("즉시 구매가로 낙찰받고 경매를 종료합니다.")) place(Math.max(item.buyNowPrice, minBid()), true); };
+async function place(amount, instant) {
+  if (busy || !me || state() !== "active") return; busy = true; tick();
+  try {
+    const r = await runTransaction(ref(db, "auction_item"), c => {
+      if (!c || c.status !== "active" || Date.now() + off >= c.endTime) return;
+      const mn = c.bidCount ? c.currentHighestBid + c.bidStep : c.startPrice; if (amount < mn) return;
+      c.currentHighestBid = amount; c.bidCount = (c.bidCount || 0) + 1; if (instant) c.status = "sold_instant"; return c;
     });
-    if (!r.committed) return alert("이미 다른 유저가 뜯은 티켓입니다.");
-    const tk = r.snapshot.val();
-    const rem = await runTransaction(ref(db, "current_board/remaining"), c => (c > 0 ? c - 1 : undefined));
-    const last = rem.snapshot.val() === 0, bonus = board.last_one_reward || 0;
-    await push(ref(db, "history"), { timestamp: Date.now(), userId: uid, userName: uname, ticketId: +id, rank: tk.rank, reward: tk.reward, token });
-    if (last) {
-      await set(ref(db, "current_board/lastOne"), { userId: uid, userName: uname, reward: bonus });
-      await push(ref(db, "history"), { timestamp: Date.now(), userId: uid, userName: uname, ticketId: +id, rank: "LAST", reward: bonus, token });
-      await set(ref(db, "current_board/status"), "completed");
-    }
-    show(tk, last, bonus);
-  } catch (e) { alert("오류: " + e.message); } finally { busy = false; el.classList.remove("tear"); }
+    if (!r.committed) { $("msg").textContent = "다른 유저가 먼저 입찰했거나 마감되었습니다. 금액을 다시 확인하세요."; return; }
+    myLast = amount;
+    await push(ref(db, "bids"), { auctionId: item.id, uid: me.uid, nickname: me.nickname, discordId: me.discordId, amount, timestamp: Date.now(), instant });
+    await runTransaction(ref(db, "auction_private/highest"), c => (!c || amount > c.amount) ? { uid: me.uid, nickname: me.nickname, discordId: me.discordId, amount } : undefined);
+    $("amt").value = "";
+  } catch (e) { $("msg").textContent = "오류: " + e.message; } finally { busy = false; tick(); }
 }
-function show(tk, last, bonus) {
-  const p = (board.prizes || []).find(z => z.rank === tk.rank);
-  $("box").className = "box" + (last ? " last" : "");
-  $("mt").textContent = "결과"; $("mr").textContent = tk.rank;
-  $("mn").textContent = (p ? p.name : tk.rank) + " 당첨";
-  $("mc").textContent = "획득 코인: " + tk.reward + (last ? " + 라스트원상 보너스 " + bonus : "");
-  if (last) $("mt").textContent = "라스트원상 획득";
-  $("modal").classList.add("show");
+
+function admInit() {
+  if (admOn) return; admOn = true;
+  onValue(ref(db, "auction_private/highest"), s => { hi = s.val(); admDraw(); });
+  onValue(ref(db, "bids"), s => { bids = []; s.forEach(c => { bids.push(c.val()); }); admDraw(); });
 }
+function admDraw() {
+  const sm = { active: "진행 중", ended: "마감", sold_instant: "즉시구매 낙찰" }, st = $("a_st"), hb = $("a_hb"); st.textContent = ""; hb.textContent = "";
+  const mk = (p, a, b) => { const x = document.createElement("span"), y = document.createElement("span"); x.textContent = a; y.textContent = b; p.append(x, y); };
+  mk(st, item ? item.title : "경매 없음", item ? (sm[item.status] || item.status) + " / 최고가 " + fmt(item.currentHighestBid) + " / 입찰 " + (item.bidCount || 0) + "회" : "");
+  mk(hb, "현재 최고 입찰자", hi && item && item.bidCount ? hi.nickname + " (ID " + hi.discordId + ")" : "-");
+  const tb = $("a_log"); tb.textContent = ""; const cur = item ? bids.filter(b => b.auctionId === item.id) : [], top = cur.reduce((m, b) => Math.max(m, b.amount), 0);
+  cur.sort((a, b) => b.timestamp - a.timestamp).forEach(b => { const tr = tb.insertRow();
+    [new Date(b.timestamp).toLocaleString(), b.nickname, b.discordId, fmt(b.amount), b.instant ? "즉시구매" : b.amount === top ? "최고가" : ""].forEach(v => { tr.insertCell().textContent = v; }); });
+}
+$("a_start").onclick = async () => {
+  const sp = +$("a_sp").value, step = +$("a_step").value, bn = +$("a_bn").value, end = new Date($("a_end").value).getTime();
+  if (!$("a_title").value.trim() || !(sp >= 0) || !(step > 0) || !(bn >= sp) || !(end > Date.now())) return alert("입력값을 확인하세요 (종료 일시는 미래, 즉시구매가는 시작가 이상).");
+  if (!confirm("기존 경매와 입찰 기록을 모두 지우고 새로 시작합니다.")) return;
+  try {
+    await remove(ref(db, "bids")); await remove(ref(db, "auction_private")); myLast = 0;
+    await set(ref(db, "auction_item"), { id: "a" + Date.now(), title: $("a_title").value.trim(), imageUrl: $("a_img").value.trim(), description: $("a_desc").value.trim(), startPrice: sp, bidStep: step, buyNowPrice: bn, currentHighestBid: 0, bidCount: 0, endTime: end, status: "active" });
+    $("a_msg").textContent = "경매가 시작되었습니다.";
+  } catch (e) { $("a_msg").textContent = "실패: " + e.message; }
+};
+$("a_stop").onclick = async () => { if (item && confirm("경매를 종료하고 현재 최고 입찰자를 낙찰자로 확정합니다.")) await update(ref(db, "auction_item"), { status: "ended" }); };
 </script></body></html>
