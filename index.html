@@ -12,9 +12,9 @@
 <label>시작가<input id="a_sp" type="number" value="1000"></label><label>최소 호가 단위<input id="a_step" type="number" value="100"></label><label>즉시 판매가<input id="a_bn" type="number" value="10000"></label>
 <label>종료 일시<input id="a_end" type="datetime-local"></label>
 <label style="display:flex;gap:8px;align-items:center"><input id="a_mo" type="checkbox" style="width:auto"> 최대 호가 단위 제한 사용</label><label>최대 호가 단위 (현재가 대비 한 번에 올릴 수 있는 최대 금액)<input id="a_mx" type="number" min="1" value="1000"></label><label style="display:flex;gap:8px;align-items:center"><input id="a_ns" type="checkbox" style="width:auto" checked> 연속 입찰 제한 (현재 최고 입찰자는 다시 입찰 불가)</label>
-<label style="display:flex;gap:8px;align-items:center"><input id="a_sn" type="checkbox" style="width:auto"> 막타 방지 사용 (마감 임박 입찰 시 자동 연장)</label><label>발동 구간 (마감 N초 전부터 적용)<input id="a_sw" type="number" min="1" value="60"></label><label>연장 시간 (초)<input id="a_se" type="number" min="1" value="60"></label></div>
+<label style="display:flex;gap:8px;align-items:center"><input id="a_sn" type="checkbox" style="width:auto"> 막타 방지 사용 (마감 임박 입찰 시 자동 연장)</label><label>발동 구간 (마감 N초 전부터 적용)<input id="a_sw" type="number" min="1" value="60"></label><label>연장 시간 (초) - 첫 발동 시 이만큼 연장, 이후 입찰마다 이 시간으로 리셋<input id="a_se" type="number" min="1" value="60"></label></div>
 <button class="b" id="a_start">경매 시작 / 리셋</button> <button class="b r" id="a_stop">강제 종료 (낙찰 확정)</button> <span id="a_msg"></span></div>
-<div class="card"><h2>실시간 입찰 감사 로그</h2><div style="overflow:auto"><table><thead><tr><th>입찰 시간</th><th>입찰자</th><th>디스코드 ID</th><th>금액</th><th>비고</th></tr></thead><tbody id="a_log"></tbody></table></div></div>
+<details class="card"><summary style="cursor:pointer;font-weight:600">실시간 입찰 감사 로그 <span class="mu" id="a_cnt"></span></summary><div style="overflow:auto;max-height:360px;margin-top:10px"><table><thead><tr><th>입찰 시간</th><th>입찰자</th><th>디스코드 ID</th><th>금액</th><th>비고</th></tr></thead><tbody id="a_log"></tbody></table></div></details>
 </div>
 <div id="empty" class="card">불러오는 중...</div>
 <div class="grid2 hide" id="main">
@@ -29,7 +29,7 @@ import { db, auth } from "./firebase-config.js";
 import { ref, onValue, get, set, push, remove, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 const $ = id => document.getElementById(id), fmt = n => Number(n || 0).toLocaleString("ko-KR");
-let errS = "", errT = 0, lastId = null, lastEnd = 0, extT = null, picData = null, imgNode = null, isAdmin = false, admOn = false, hi = null, bids = [], me = null, item = null, off = 0, myLast = 0, busy = false, reg = false, pend = null;
+let lastAct = false, errS = "", errT = 0, lastId = null, lastEnd = 0, extT = null, picData = null, imgNode = null, isAdmin = false, admOn = false, hi = null, bids = [], me = null, item = null, off = 0, myLast = 0, busy = false, reg = false, pend = null;
 onValue(ref(db, ".info/serverTimeOffset"), s => off = s.val() || 0);
 const now = () => Date.now() + off;
 async function emailOf(n) {
@@ -65,6 +65,7 @@ onValue(ref(db, "auction_item"), s => { item = s.val(); render(); });
 onValue(ref(db, "auction_image"), s => { imgNode = s.val(); render(); });
 const state = () => !item ? "none" : item.status === "sold_instant" ? "sold" : (item.status === "ended" || now() >= item.endTime) ? "end" : "active";
 const minBid = () => item.bidCount ? item.currentHighestBid + item.bidStep : item.startPrice;
+function dur(n) { return n >= 60 && n % 60 === 0 ? n / 60 + "분" : n + "초"; }
 function maxBid() { return !item.maxStepOn ? Infinity : (item.bidCount ? item.currentHighestBid : item.startPrice) + item.maxStep; }
 function mlv() { try { return myLast || (me ? +localStorage.getItem("ml_" + me.uid + item.id) || 0 : 0); } catch (e) { return myLast; } }
 function render() {
@@ -77,11 +78,11 @@ function render() {
     if (src) { const im = new Image(); im.referrerPolicy = "no-referrer"; im.alt = ""; im.onerror = () => { i.textContent = "이미지를 불러올 수 없습니다"; }; im.src = src; i.append(im); } else i.textContent = "IMAGE";
   }
   $("title").textContent = item.title; $("desc").textContent = item.description || "";
-  $("snipe").textContent = item.snipeOn ? "막타 방지 적용: 마감 " + item.snipeWindow + "초 전부터 입찰하면 마감이 " + item.snipeExtend + "초 연장됩니다." : "막타 방지 없음: 정해진 시각에 정확히 마감됩니다.";
-  if (lastId === item.id && lastEnd && item.endTime > lastEnd) { $("ext").textContent = "마감 시간이 " + Math.round((item.endTime - lastEnd) / 1000) + "초 연장되었습니다."; clearTimeout(extT); extT = setTimeout(() => { $("ext").textContent = ""; }, 6000); }
+  $("snipe").textContent = item.snipeOn ? (item.snipeActive ? "막타 방지 발동 중: 최고가가 갱신될 때마다 마감 타이머가 " + dur(item.snipeExtend) + " 기준으로 리셋됩니다." : "막타 방지 적용: 마감 " + dur(item.snipeWindow) + " 전 이후 첫 입찰이 들어오면 마감이 " + dur(item.snipeExtend) + " 연장되고, 이후에는 최고가가 갱신될 때마다 마감 타이머가 " + dur(item.snipeExtend) + " 기준으로 리셋됩니다.") : "막타 방지 없음: 정해진 시각에 정확히 마감됩니다.";
+  if (lastId === item.id && lastEnd && item.endTime !== lastEnd && item.snipeOn) { $("ext").textContent = !lastAct && item.snipeActive ? "막타 방지 발동: 마감이 " + dur(item.snipeExtend) + " 연장되었습니다." : "막타 방지: 마감 타이머가 " + dur(item.snipeExtend) + " 기준으로 리셋되었습니다."; clearTimeout(extT); extT = setTimeout(() => { $("ext").textContent = ""; }, 6000); }
   if (lastId && lastId !== item.id) myLast = 0;
   $("selfn").textContent = item.noSelfRaise ? "연속 입찰 제한: 현재 최고 입찰자는 다른 입찰자가 입찰하기 전까지 다시 입찰할 수 없습니다 (즉시 구매는 가능)." : "";
-  lastId = item.id; lastEnd = item.endTime;
+  lastAct = !!item.snipeActive; lastId = item.id; lastEnd = item.endTime;
   $("sp").textContent = fmt(item.startPrice); $("st").textContent = fmt(item.bidStep); $("mx").textContent = item.maxStepOn ? fmt(item.maxStep) : "제한 없음"; $("bn").textContent = fmt(item.buyNowPrice); $("bc").textContent = item.bidCount || 0;
   $("cur").textContent = item.bidCount ? fmt(item.currentHighestBid) : fmt(item.startPrice) + " (입찰 없음)";
   const mn = minBid(); $("q").textContent = "";
@@ -107,7 +108,8 @@ async function place(amount, instant) {
       if (!c || c.status !== "active" || Date.now() + off >= c.endTime) return;
       const mn = c.bidCount ? c.currentHighestBid + c.bidStep : c.startPrice; if (amount < mn) return;
       if (c.maxStepOn && !instant && amount > (c.bidCount ? c.currentHighestBid : c.startPrice) + c.maxStep) return;
-      if (c.snipeOn && Date.now() + off >= c.endTime - c.snipeWindow * 1000) c.endTime += c.snipeExtend * 1000;
+      const nt = Date.now() + off;
+      if (c.snipeOn) { if (c.snipeActive) c.endTime = nt + c.snipeExtend * 1000; else if (nt >= c.endTime - c.snipeWindow * 1000) { c.endTime += c.snipeExtend * 1000; c.snipeActive = true; } }
       c.currentHighestBid = amount; c.bidCount = (c.bidCount || 0) + 1; if (instant) c.status = "sold_instant"; return c;
     });
     let r; try { r = await run(); } catch (e) { r = await run(); }
@@ -130,6 +132,7 @@ function admDraw() {
   mk(st, item ? item.title : "경매 없음", item ? (sm[item.status] || item.status) + " / 최고가 " + fmt(item.currentHighestBid) + " / 입찰 " + (item.bidCount || 0) + "회" : "");
   mk(hb, "현재 최고 입찰자", hi && item && item.bidCount ? hi.nickname + " (ID " + hi.discordId + ")" : "-");
   const tb = $("a_log"); tb.textContent = ""; const cur = item ? bids.filter(b => b.auctionId === item.id) : [], top = cur.reduce((m, b) => Math.max(m, b.amount), 0);
+  $("a_cnt").textContent = "(" + cur.length + "건)";
   cur.sort((a, b) => b.timestamp - a.timestamp).forEach(b => { const tr = tb.insertRow();
     [new Date(b.timestamp).toLocaleString(), b.nickname, b.discordId, fmt(b.amount), b.instant ? "즉시구매" : b.amount === top ? "최고가" : ""].forEach(v => { tr.insertCell().textContent = v; }); });
 }
@@ -160,7 +163,7 @@ $("a_start").onclick = async () => {
     await remove(ref(db, "bids")); await remove(ref(db, "auction_private")); myLast = 0;
     const aid = "a" + Date.now();
     if (picData) await set(ref(db, "auction_image"), { id: aid, data: picData }); else await remove(ref(db, "auction_image"));
-    await set(ref(db, "auction_item"), { id: aid, title: $("a_title").value.trim(), imageUrl: $("a_img").value.trim(), description: $("a_desc").value.trim(), startPrice: sp, bidStep: step, buyNowPrice: bn, currentHighestBid: 0, bidCount: 0, endTime: end, snipeOn: sn, snipeWindow: sn ? sw : 0, snipeExtend: sn ? se : 0, maxStepOn: mo, maxStep: mo ? mxv : 0, noSelfRaise: ns, status: "active" });
+    await set(ref(db, "auction_item"), { id: aid, title: $("a_title").value.trim(), imageUrl: $("a_img").value.trim(), description: $("a_desc").value.trim(), startPrice: sp, bidStep: step, buyNowPrice: bn, currentHighestBid: 0, bidCount: 0, endTime: end, snipeOn: sn, snipeWindow: sn ? sw : 0, snipeExtend: sn ? se : 0, snipeActive: false, maxStepOn: mo, maxStep: mo ? mxv : 0, noSelfRaise: ns, status: "active" });
     $("a_msg").textContent = "경매가 시작되었습니다."; picData = null; $("a_file").value = ""; $("a_prev").classList.add("hide");
   } catch (e) { $("a_msg").textContent = "실패: " + e.message; }
 };
