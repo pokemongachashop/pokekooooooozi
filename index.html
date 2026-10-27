@@ -11,15 +11,16 @@
 <label>상품명<input id="a_title"></label><label>상품 이미지 (갤러리에서 선택)<input id="a_file" type="file" accept="image/*"></label><img id="a_prev" class="hide" alt="" style="max-width:160px;border-radius:8px"><label>또는 이미지 URL (파일을 고르지 않았을 때 사용)<input id="a_img" placeholder="https://..."></label><label>상세 설명<textarea id="a_desc" rows="3"></textarea></label>
 <label>시작가<input id="a_sp" type="number" value="1000"></label><label>최소 호가 단위<input id="a_step" type="number" value="100"></label><label>즉시 판매가<input id="a_bn" type="number" value="10000"></label>
 <label>종료 일시<input id="a_end" type="datetime-local"></label>
+<label style="display:flex;gap:8px;align-items:center"><input id="a_mo" type="checkbox" style="width:auto"> 최대 호가 단위 제한 사용</label><label>최대 호가 단위 (현재가 대비 한 번에 올릴 수 있는 최대 금액)<input id="a_mx" type="number" min="1" value="1000"></label><label style="display:flex;gap:8px;align-items:center"><input id="a_ns" type="checkbox" style="width:auto" checked> 연속 입찰 제한 (현재 최고 입찰자는 다시 입찰 불가)</label>
 <label style="display:flex;gap:8px;align-items:center"><input id="a_sn" type="checkbox" style="width:auto"> 막타 방지 사용 (마감 임박 입찰 시 자동 연장)</label><label>발동 구간 (마감 N초 전부터 적용)<input id="a_sw" type="number" min="1" value="60"></label><label>연장 시간 (초)<input id="a_se" type="number" min="1" value="60"></label></div>
 <button class="b" id="a_start">경매 시작 / 리셋</button> <button class="b r" id="a_stop">강제 종료 (낙찰 확정)</button> <span id="a_msg"></span></div>
 <div class="card"><h2>실시간 입찰 감사 로그</h2><div style="overflow:auto"><table><thead><tr><th>입찰 시간</th><th>입찰자</th><th>디스코드 ID</th><th>금액</th><th>비고</th></tr></thead><tbody id="a_log"></tbody></table></div></div>
 </div>
 <div id="empty" class="card">불러오는 중...</div>
 <div class="grid2 hide" id="main">
-<div class="card"><div class="img" id="img"></div><h1 id="title"></h1><div class="mu" id="desc"></div><p class="mu">낙찰 전까지 입찰자는 모두 익명으로 표시됩니다.</p><h2>남은 시간</h2><div class="timer" id="timer">--:--:--</div><div class="mu" id="snipe" style="color:var(--gd)"></div><div class="mu" id="ext" style="color:var(--ok)"></div></div>
+<div class="card"><div class="img" id="img"></div><h1 id="title"></h1><div class="mu" id="desc"></div><p class="mu">낙찰 전까지 입찰자는 모두 익명으로 표시됩니다.</p><h2>남은 시간</h2><div class="timer" id="timer">--:--:--</div><div class="mu" id="snipe" style="color:var(--gd)"></div><div class="mu" id="ext" style="color:var(--ok)"></div><div class="mu" id="selfn" style="color:var(--gd)"></div></div>
 <div class="card"><h2>현재 최고 입찰가</h2><div class="big" id="cur"></div><div class="mu" id="hi"></div>
-<div class="row"><span>시작가</span><span id="sp"></span></div><div class="row"><span>최소 호가 단위</span><span id="st"></span></div>
+<div class="row"><span>시작가</span><span id="sp"></span></div><div class="row"><span>최소 호가 단위</span><span id="st"></span></div><div class="row"><span>최대 호가 단위</span><span id="mx"></span></div>
 <div class="row"><span>즉시 구매가</span><span id="bn"></span></div><div class="row"><span>총 입찰 횟수</span><span id="bc"></span></div>
 <div class="q" id="q"></div><div class="f"><input id="amt" type="number" inputmode="numeric" placeholder="입찰 금액"><button class="b" id="bid">입찰하기</button><button class="b y" id="buy">즉시 구매</button></div><div class="warn" id="msg"></div></div>
 </div></main>
@@ -28,7 +29,7 @@ import { db, auth } from "./firebase-config.js";
 import { ref, onValue, get, set, push, remove, update, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 const $ = id => document.getElementById(id), fmt = n => Number(n || 0).toLocaleString("ko-KR");
-let lastId = null, lastEnd = 0, extT = null, picData = null, imgNode = null, isAdmin = false, admOn = false, hi = null, bids = [], me = null, item = null, off = 0, myLast = 0, busy = false, reg = false, pend = null;
+let errS = "", errT = 0, lastId = null, lastEnd = 0, extT = null, picData = null, imgNode = null, isAdmin = false, admOn = false, hi = null, bids = [], me = null, item = null, off = 0, myLast = 0, busy = false, reg = false, pend = null;
 onValue(ref(db, ".info/serverTimeOffset"), s => off = s.val() || 0);
 const now = () => Date.now() + off;
 async function emailOf(n) {
@@ -64,6 +65,8 @@ onValue(ref(db, "auction_item"), s => { item = s.val(); render(); });
 onValue(ref(db, "auction_image"), s => { imgNode = s.val(); render(); });
 const state = () => !item ? "none" : item.status === "sold_instant" ? "sold" : (item.status === "ended" || now() >= item.endTime) ? "end" : "active";
 const minBid = () => item.bidCount ? item.currentHighestBid + item.bidStep : item.startPrice;
+function maxBid() { return !item.maxStepOn ? Infinity : (item.bidCount ? item.currentHighestBid : item.startPrice) + item.maxStep; }
+function mlv() { try { return myLast || (me ? +localStorage.getItem("ml_" + me.uid + item.id) || 0 : 0); } catch (e) { return myLast; } }
 function render() {
   if (isAdmin) admDraw();
   $("empty").classList.toggle("hide", !!item); $("main").classList.toggle("hide", !item);
@@ -76,11 +79,13 @@ function render() {
   $("title").textContent = item.title; $("desc").textContent = item.description || "";
   $("snipe").textContent = item.snipeOn ? "막타 방지 적용: 마감 " + item.snipeWindow + "초 전부터 입찰하면 마감이 " + item.snipeExtend + "초 연장됩니다." : "막타 방지 없음: 정해진 시각에 정확히 마감됩니다.";
   if (lastId === item.id && lastEnd && item.endTime > lastEnd) { $("ext").textContent = "마감 시간이 " + Math.round((item.endTime - lastEnd) / 1000) + "초 연장되었습니다."; clearTimeout(extT); extT = setTimeout(() => { $("ext").textContent = ""; }, 6000); }
+  if (lastId && lastId !== item.id) myLast = 0;
+  $("selfn").textContent = item.noSelfRaise ? "연속 입찰 제한: 현재 최고 입찰자는 다른 입찰자가 입찰하기 전까지 다시 입찰할 수 없습니다 (즉시 구매는 가능)." : "";
   lastId = item.id; lastEnd = item.endTime;
-  $("sp").textContent = fmt(item.startPrice); $("st").textContent = fmt(item.bidStep); $("bn").textContent = fmt(item.buyNowPrice); $("bc").textContent = item.bidCount || 0;
+  $("sp").textContent = fmt(item.startPrice); $("st").textContent = fmt(item.bidStep); $("mx").textContent = item.maxStepOn ? fmt(item.maxStep) : "제한 없음"; $("bn").textContent = fmt(item.buyNowPrice); $("bc").textContent = item.bidCount || 0;
   $("cur").textContent = item.bidCount ? fmt(item.currentHighestBid) : fmt(item.startPrice) + " (입찰 없음)";
   const mn = minBid(); $("q").textContent = "";
-  [0, 1, 4].forEach(k => { const b = document.createElement("button"); b.className = "b g"; b.textContent = fmt(mn + k * item.bidStep); b.onclick = () => place(mn + k * item.bidStep, false); $("q").append(b); });
+  [0, 1, 4].filter(k => mn + k * item.bidStep <= maxBid()).forEach(k => { const b = document.createElement("button"); b.className = "b g"; b.textContent = fmt(mn + k * item.bidStep); b.onclick = () => place(mn + k * item.bidStep, false); $("q").append(b); });
   $("amt").min = mn; tick();
 }
 function tick() {
@@ -88,10 +93,10 @@ function tick() {
   $("timer").textContent = s === "active" ? [3600000, 60000, 1000].map((d, k) => String(Math.floor(left / d) % (k ? 60 : 1e6)).padStart(2, "0")).join(":") : "00:00:00";
   const bd = $("badge"); bd.classList.remove("hide"); bd.className = "badge" + (s === "end" ? " end" : s === "sold" ? " sold" : "");
   bd.textContent = s === "active" ? "진행 중" : s === "sold" ? "즉시구매 낙찰" : "마감";
-  $("hi").textContent = !item.bidCount ? "" : (myLast && myLast === item.currentHighestBid && s !== "none") ? "내가 현재 최고 입찰자입니다." : "현재 최고 입찰자: 익명의 입찰자";
-  const on = !!me && !isAdmin && s === "active" && !busy, v = +$("amt").value;
-  $("bid").disabled = !on || !(v >= minBid()); $("buy").disabled = !on; [...$("q").children].forEach(b => b.disabled = !on);
-  $("msg").textContent = isAdmin ? "관리자 계정은 입찰할 수 없습니다." : !me && s === "active" ? "입찰하려면 로그인하세요." : "";
+  $("hi").textContent = !item.bidCount ? "" : (mlv() && mlv() === item.currentHighestBid && s !== "none") ? "내가 현재 최고 입찰자입니다." : "현재 최고 입찰자: 익명의 입찰자";
+  const on = !!me && !isAdmin && s === "active" && !busy, v = +$("amt").value, blk = on && item.noSelfRaise && item.bidCount > 0 && mlv() === item.currentHighestBid, mx = maxBid();
+  $("bid").disabled = !on || blk || !(v >= minBid()) || v > mx; $("buy").disabled = !on; [...$("q").children].forEach(b => b.disabled = !on || blk);
+  $("msg").textContent = Date.now() - errT < 6000 ? errS : isAdmin ? "관리자 계정은 입찰할 수 없습니다." : !me && s === "active" ? "입찰하려면 로그인하세요." : blk ? "현재 최고 입찰자입니다. 다른 입찰자가 입찰한 뒤에 다시 입찰할 수 있습니다." : v > mx ? "한 번에 입찰 가능한 최대 금액은 " + fmt(mx) + "입니다." : "";
 }
 setInterval(tick, 500); $("amt").oninput = tick; $("bid").onclick = () => place(+$("amt").value, false);
 $("buy").onclick = () => { if (confirm("즉시 구매가로 낙찰받고 경매를 종료합니다.")) place(Math.max(item.buyNowPrice, minBid()), true); };
@@ -101,16 +106,17 @@ async function place(amount, instant) {
     const run = () => runTransaction(ref(db, "auction_item"), c => {
       if (!c || c.status !== "active" || Date.now() + off >= c.endTime) return;
       const mn = c.bidCount ? c.currentHighestBid + c.bidStep : c.startPrice; if (amount < mn) return;
+      if (c.maxStepOn && !instant && amount > (c.bidCount ? c.currentHighestBid : c.startPrice) + c.maxStep) return;
       if (c.snipeOn && Date.now() + off >= c.endTime - c.snipeWindow * 1000) c.endTime += c.snipeExtend * 1000;
       c.currentHighestBid = amount; c.bidCount = (c.bidCount || 0) + 1; if (instant) c.status = "sold_instant"; return c;
     });
     let r; try { r = await run(); } catch (e) { r = await run(); }
-    if (!r.committed) { $("msg").textContent = "다른 유저가 먼저 입찰했거나 마감되었습니다. 금액을 다시 확인하세요."; return; }
-    myLast = amount;
+    if (!r.committed) { errS = "다른 유저가 먼저 입찰했거나 마감되었거나 최대 호가 단위를 넘었습니다. 금액을 다시 확인하세요."; errT = Date.now(); return; }
+    myLast = amount; try { localStorage.setItem("ml_" + me.uid + item.id, amount); } catch (e) {}
     await push(ref(db, "bids"), { auctionId: item.id, uid: me.uid, nickname: me.nickname, discordId: me.discordId, amount, timestamp: Date.now(), instant });
     await runTransaction(ref(db, "auction_private/highest"), c => (!c || amount > c.amount) ? { uid: me.uid, nickname: me.nickname, discordId: me.discordId, amount } : undefined);
     $("amt").value = "";
-  } catch (e) { $("msg").textContent = "오류: " + e.message; } finally { busy = false; tick(); }
+  } catch (e) { errS = /permission/i.test(e.message) ? "입찰이 거부되었습니다. 최대 호가 단위를 넘었거나, 현재 최고 입찰자는 연속으로 입찰할 수 없습니다." : "오류: " + e.message; errT = Date.now(); } finally { busy = false; tick(); }
 }
 
 function admInit() {
@@ -147,12 +153,14 @@ $("a_start").onclick = async () => {
   if (!$("a_title").value.trim() || !(sp >= 0) || !(step > 0) || !(bn >= sp) || !(end > Date.now())) return alert("입력값을 확인하세요 (종료 일시는 미래, 즉시구매가는 시작가 이상).");
   const sn = $("a_sn").checked, sw = +$("a_sw").value, se = +$("a_se").value;
   if (sn && !(Number.isInteger(sw) && Number.isInteger(se) && sw >= 1 && se >= 1)) return alert("막타 방지의 발동 구간과 연장 시간은 1초 이상의 정수로 입력하세요.");
+  const mo = $("a_mo").checked, mxv = +$("a_mx").value, ns = $("a_ns").checked;
+  if (mo && !(Number.isInteger(mxv) && mxv >= step)) return alert("최대 호가 단위는 최소 호가 단위 이상의 정수로 입력하세요.");
   if (!confirm("기존 경매와 입찰 기록을 모두 지우고 새로 시작합니다.")) return;
   try {
     await remove(ref(db, "bids")); await remove(ref(db, "auction_private")); myLast = 0;
     const aid = "a" + Date.now();
     if (picData) await set(ref(db, "auction_image"), { id: aid, data: picData }); else await remove(ref(db, "auction_image"));
-    await set(ref(db, "auction_item"), { id: aid, title: $("a_title").value.trim(), imageUrl: $("a_img").value.trim(), description: $("a_desc").value.trim(), startPrice: sp, bidStep: step, buyNowPrice: bn, currentHighestBid: 0, bidCount: 0, endTime: end, snipeOn: sn, snipeWindow: sn ? sw : 0, snipeExtend: sn ? se : 0, status: "active" });
+    await set(ref(db, "auction_item"), { id: aid, title: $("a_title").value.trim(), imageUrl: $("a_img").value.trim(), description: $("a_desc").value.trim(), startPrice: sp, bidStep: step, buyNowPrice: bn, currentHighestBid: 0, bidCount: 0, endTime: end, snipeOn: sn, snipeWindow: sn ? sw : 0, snipeExtend: sn ? se : 0, maxStepOn: mo, maxStep: mo ? mxv : 0, noSelfRaise: ns, status: "active" });
     $("a_msg").textContent = "경매가 시작되었습니다."; picData = null; $("a_file").value = ""; $("a_prev").classList.add("hide");
   } catch (e) { $("a_msg").textContent = "실패: " + e.message; }
 };
